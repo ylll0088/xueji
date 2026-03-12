@@ -7,7 +7,7 @@
     <!-- 引入 Supabase SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        /* 样式部分（完整，请保留） */
+        /* 样式部分与之前完全相同（略，实际使用时保留全部样式） */
         * { margin:0; padding:0; box-sizing:border-box; font-family:'PingFang SC','Microsoft YaHei',sans-serif; }
         body { background:#F5F7FA; min-height:100vh; }
         .app-container { display:flex; flex-direction:column; min-height:100vh; background:#F5F7FA; }
@@ -201,6 +201,8 @@
                 document.body.appendChild(toast);
                 setTimeout(() => toast.remove(), 2000);
             }
+            // 暴露给全局，供内联 onclick 调用
+            window.showToast = showToast;
 
             function showEffect(type) {
                 const layer = document.getElementById('effectLayer');
@@ -248,6 +250,7 @@
                 }
             }
 
+            // 更新掌握度（带重载）
             async function updateMastery(questionId, correct) {
                 if (!currentUser) return;
 
@@ -302,10 +305,12 @@
             function openAuthModal() {
                 document.getElementById('authModal').classList.add('active');
             }
+            window.openAuthModal = openAuthModal; // 供内联调用
 
             function closeAuthModal() {
                 document.getElementById('authModal').classList.remove('active');
             }
+            window.closeAuthModal = closeAuthModal;
 
             // ========== 数据加载 ==========
             async function checkLogin() {
@@ -435,6 +440,7 @@
                 });
             }
 
+            // 图片上传修复：使用安全文件名
             function loadQuestionInput(area) {
                 currentUploadedFileUrl = null;
                 area.innerHTML = `
@@ -471,7 +477,11 @@
                     };
                     reader.readAsDataURL(file);
 
-                    const filePath = `${currentUser?._id || 'temp'}/${Date.now()}_${file.name}`;
+                    // 生成安全文件名：时间戳 + 随机字符串 + 扩展名
+                    const ext = file.name.split('.').pop() || 'jpg';
+                    const safeFileName = `${Date.now()}_${Math.random().toString(36).substring(2)}.${ext}`;
+                    const filePath = `${currentUser?._id || 'temp'}/${safeFileName}`;
+
                     const { error } = await supabase.storage
                         .from('question-images')
                         .upload(filePath, file);
@@ -526,6 +536,7 @@
                 });
             }
 
+            // 题库管理：删除题目时先删除相关进度
             async function loadQuestionBank(area) {
                 if (!currentUser) { area.innerHTML = '<div class="section-card">请先登录查看题库</div>'; return; }
                 const { data: qData } = await supabase
@@ -576,6 +587,16 @@
                         const index = this.dataset.index;
                         const q = questions[index];
                         if (confirm('确定要删除这道题吗？')) {
+                            // 先删除相关的进度记录
+                            const { error: delProgress } = await supabase
+                                .from('progress')
+                                .delete()
+                                .eq('question_id', q.id);
+                            if (delProgress) {
+                                showToast('删除进度失败');
+                                return;
+                            }
+                            // 再删除题目
                             const { error } = await supabase
                                 .from('questions')
                                 .delete()
@@ -592,21 +613,136 @@
                 });
             }
 
+            // 批量导入：增强版，带模板下载和实际导入
             function loadBatchImport(area) {
                 area.innerHTML = `
                     <div class="section-card">
                         <div class="card-title">📁 批量导入</div>
+                        <div style="margin-bottom:16px; background:#F0F4FF; padding:16px; border-radius:16px;">
+                            <p style="margin-bottom:8px;"><strong>使用说明：</strong></p>
+                            <ul style="margin-left:20px; color:#4A5A6E; font-size:14px;">
+                                <li>下载CSV模板，按格式填写题目数据。</li>
+                                <li>支持列：年级,章节,题目,答案,来源,学科(可选，默认为选择的目标学科)</li>
+                                <li>如果题目是选择题，请在“题目”列中包含 A. xxx B. xxx 等选项，系统会自动识别。</li>
+                                <li>点击“选择文件”上传CSV，然后点击“开始导入”。</li>
+                            </ul>
+                            <button class="action-btn" id="downloadTemplateBtn" style="margin-top:8px;">📥 下载模板</button>
+                        </div>
                         <div class="form-group">
+                            <label class="form-label">选择目标学科（作为默认学科）</label>
                             <select class="form-input" id="batchSubject">${subjects.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
                         </div>
-                        <div class="upload-zone" id="dropZone"><div class="upload-icon">📂</div><div>点击或拖拽 CSV 文件</div><div style="font-size:12px; color:#7F8C9F;">支持格式：年级,章节,题目,答案,来源</div></div>
-                        <button class="btn" id="startImport">开始导入</button>
+                        <div class="upload-zone" id="dropZone">
+                            <div class="upload-icon">📂</div>
+                            <div>点击或拖拽 CSV 文件到此处</div>
+                            <div style="font-size:12px; color:#7F8C9F;">支持格式：年级,章节,题目,答案,来源,学科(可选)</div>
+                        </div>
+                        <input type="file" id="csvFileInput" accept=".csv" style="display:none;">
+                        <button class="btn" id="startImportBtn">开始导入</button>
+                        <div id="importProgress" style="margin-top:16px; display:none;">正在导入...</div>
                     </div>
                 `;
-                document.getElementById('dropZone').addEventListener('click', () => showToast('选择CSV文件'));
-                document.getElementById('startImport').addEventListener('click', () => {
-                    const subject = document.getElementById('batchSubject').value;
-                    showToast(`开始导入到 ${subject} 学科`);
+
+                // 下载模板
+                document.getElementById('downloadTemplateBtn').addEventListener('click', () => {
+                    const template = '年级,章节,题目,答案,来源,学科\n五年级,小数乘法,0.5×2=?,1,课本,数学\n六年级,词汇,苹果的英文？,apple,练习册,英语';
+                    const blob = new Blob(['\uFEFF' + template], { type: 'text/csv;charset=utf-8;' }); // 添加BOM使中文不乱码
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = 'import_template.csv';
+                    link.click();
+                });
+
+                const dropZone = document.getElementById('dropZone');
+                const fileInput = document.getElementById('csvFileInput');
+                dropZone.addEventListener('click', () => fileInput.click());
+
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    dropZone.style.background = '#E8F0FE';
+                });
+                dropZone.addEventListener('dragleave', () => {
+                    dropZone.style.background = '#F0F4FF';
+                });
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropZone.style.background = '#F0F4FF';
+                    const file = e.dataTransfer.files[0];
+                    if (file && file.name.endsWith('.csv')) {
+                        fileInput.files = e.dataTransfer.files;
+                        showToast(`已选择文件: ${file.name}`);
+                    } else {
+                        showToast('请选择CSV文件');
+                    }
+                });
+
+                fileInput.addEventListener('change', () => {
+                    if (fileInput.files.length > 0) {
+                        showToast(`已选择文件: ${fileInput.files[0].name}`);
+                    }
+                });
+
+                document.getElementById('startImportBtn').addEventListener('click', async () => {
+                    if (!currentUser) { showToast('请先登录'); openAuthModal(); return; }
+                    if (!fileInput.files.length) { showToast('请先选择CSV文件'); return; }
+
+                    const subjectDefault = document.getElementById('batchSubject').value;
+                    const file = fileInput.files[0];
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const content = e.target.result;
+                        const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
+                        if (lines.length < 2) { showToast('CSV至少需要标题行和一行数据'); return; }
+
+                        const headers = lines[0].split(',').map(h => h.trim());
+                        const required = ['年级', '章节', '题目', '答案'];
+                        const missing = required.filter(r => !headers.includes(r));
+                        if (missing.length) {
+                            showToast(`CSV缺少必要列: ${missing.join(', ')}`);
+                            return;
+                        }
+
+                        const progressDiv = document.getElementById('importProgress');
+                        progressDiv.style.display = 'block';
+                        progressDiv.textContent = '正在导入...';
+
+                        let success = 0;
+                        for (let i = 1; i < lines.length; i++) {
+                            const values = lines[i].split(',').map(v => v.trim());
+                            const row = {};
+                            headers.forEach((h, idx) => row[h] = values[idx] || '');
+
+                            // 确定学科：优先使用CSV中的学科列，否则用默认学科
+                            let subject = row['学科'] || subjectDefault;
+                            if (!subject) subject = '数学'; // 兜底
+
+                            // 自动识别是否为选择题（如果题目中包含 A. 或 B. 等）
+                            let options = null;
+                            if (row['题目'].includes('A.') || row['题目'].includes('B.')) {
+                                options = ['A','B','C','D']; // 简化，实际可以提取选项
+                            }
+
+                            const questionData = {
+                                user_id: currentUser._id,
+                                subject,
+                                chapter: row['章节'] || '',
+                                question: row['题目'] || '',
+                                answer: row['答案'] || '',
+                                options,
+                                source: row['来源'] || '',
+                                grade: row['年级'] || '',
+                                image_url: null,
+                                created_at: new Date()
+                            };
+
+                            const { error } = await supabase.from('questions').insert([questionData]);
+                            if (!error) success++;
+                        }
+                        progressDiv.style.display = 'none';
+                        showToast(`导入完成！成功 ${success} 条，失败 ${lines.length-1-success} 条`);
+                        fileInput.value = ''; // 清空
+                    };
+                    reader.readAsText(file, 'UTF-8');
                 });
             }
 
