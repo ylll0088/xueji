@@ -7,7 +7,7 @@
     <!-- 引入 Supabase SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        /* 样式部分与之前完全相同（省略，实际使用时保留全部样式） */
+        /* 样式部分（完整，请保留） */
         * { margin:0; padding:0; box-sizing:border-box; font-family:'PingFang SC','Microsoft YaHei',sans-serif; }
         body { background:#F5F7FA; min-height:100vh; }
         .app-container { display:flex; flex-direction:column; min-height:100vh; background:#F5F7FA; }
@@ -176,823 +176,803 @@
     <div id="effectLayer" style="position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:9999;"></div>
 
     <script>
-        // ========== 初始化 Supabase ==========
-        // 请将下面两行替换为你的 Supabase 项目 URL 和 anon key
-        const supabaseUrl = 'https://你的项目ID.supabase.co';
-        const supabaseKey = '你的anon public key';
-        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+        (function() {
+            // ========== 初始化 Supabase ==========
+            const supabaseUrl = 'https://qvqbeunwgiwjtzmqpxuo.supabase.co';
+            const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2cWJldW53Z2l3anR6bXFweHVvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyOTEyNjcsImV4cCI6MjA4ODg2NzI2N30.TgN4qWgmFsSeSStMXiYh-xzVW_kDqdk09CZFS8jQIR0';
+            const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+            console.log('Supabase 初始化成功', supabase);
 
-        // ========== 全局变量 ==========
-        let currentUser = null;
-        let questions = [];
-        let subjects = ['数学', '英语', '物理', '化学'];
-        let userProgress = {};
-        let currentPractice = null;
-        let currentUploadedFileUrl = null; // 用于图片上传，存储公开URL
+            // ========== 全局变量 ==========
+            let currentUser = null;
+            let questions = [];
+            let subjects = ['数学', '英语', '物理', '化学'];
+            let userProgress = {};
+            let currentPractice = null;
+            let currentUploadedFileUrl = null;
 
-        // ========== 初始化 ==========
-        async function init() {
-            await checkLogin();
-            updateDate();
-            loadContent('dashboard');
-            bindGlobalEvents();
-        }
-
-        async function checkLogin() {
-            const saved = localStorage.getItem('xueji_current');
-            if (saved) {
-                currentUser = JSON.parse(saved);
-                updateUserUI();
-                await loadUserData();
+            // ========== 工具函数 ==========
+            function showToast(msg) {
+                const t = document.querySelector('.toast-message');
+                if (t) t.remove();
+                const toast = document.createElement('div');
+                toast.className = 'toast-message';
+                toast.textContent = msg;
+                document.body.appendChild(toast);
+                setTimeout(() => toast.remove(), 2000);
             }
-        }
 
-        async function loadUserData() {
-            if (!currentUser) return;
+            function showEffect(type) {
+                const layer = document.getElementById('effectLayer');
+                layer.innerHTML = '';
+                if (type === 'balloon') {
+                    for (let i = 0; i < 6; i++) {
+                        const b = document.createElement('span');
+                        b.innerText = '🎈';
+                        b.style.position = 'absolute';
+                        b.style.left = Math.random() * 100 + '%';
+                        b.style.bottom = '0';
+                        b.style.fontSize = (30 + Math.random() * 30) + 'px';
+                        b.style.animation = 'floatUp 2s ease-in forwards';
+                        layer.appendChild(b);
+                    }
+                    setTimeout(() => layer.innerHTML = '', 2000);
+                } else {
+                    const m = document.createElement('div');
+                    m.innerText = '👾';
+                    m.style.fontSize = '60px';
+                    m.style.position = 'absolute';
+                    m.style.top = '50%';
+                    m.style.left = '50%';
+                    m.style.transform = 'translate(-50%, -50%)';
+                    layer.appendChild(m);
+                    setTimeout(() => layer.innerHTML = '', 1500);
+                }
+            }
 
-            // 加载题目
-            const { data: qData, error: qError } = await supabase
-                .from('questions')
-                .select('*')
-                .eq('user_id', currentUser._id);
-            if (qError) console.error(qError);
-            else questions = qData;
+            function updateDate() {
+                const d = new Date();
+                const month = d.getMonth() + 1;
+                const day = d.getDate();
+                document.getElementById('dateBadge').textContent = `${month}月${day}日`;
+            }
 
-            // 加载进度
-            const { data: pData, error: pError } = await supabase
-                .from('progress')
-                .select('*')
-                .eq('user_id', currentUser._id);
-            if (pError) console.error(pError);
-            else {
+            function updateUserUI() {
+                const logoutBtn = document.getElementById('logoutBtn');
+                if (currentUser) {
+                    document.getElementById('userAvatar').textContent = '👤';
+                    logoutBtn.style.display = 'inline';
+                } else {
+                    document.getElementById('userAvatar').textContent = '📱';
+                    logoutBtn.style.display = 'none';
+                }
+            }
+
+            async function updateMastery(questionId, correct) {
+                if (!currentUser) return;
+
+                const { data: existing, error: findError } = await supabase
+                    .from('progress')
+                    .select('*')
+                    .eq('user_id', currentUser._id)
+                    .eq('question_id', questionId);
+                if (findError) { console.error(findError); return; }
+
+                if (existing.length > 0) {
+                    const record = existing[0];
+                    let newMastery = record.mastery;
+                    if (correct) newMastery = Math.min(5, record.mastery + 1);
+                    else newMastery = 0;
+                    const { error: updateError } = await supabase
+                        .from('progress')
+                        .update({
+                            mastery: newMastery,
+                            last_review: new Date(),
+                            history: [...(record.history || []), { time: new Date(), correct }]
+                        })
+                        .eq('id', record.id);
+                    if (updateError) console.error(updateError);
+                    else record.mastery = newMastery;
+                } else {
+                    const newMastery = correct ? 1 : 0;
+                    const { error } = await supabase
+                        .from('progress')
+                        .insert([{
+                            user_id: currentUser._id,
+                            question_id: questionId,
+                            mastery: newMastery,
+                            last_review: new Date(),
+                            history: [{ time: new Date(), correct }]
+                        }]);
+                    if (error) console.error(error);
+                }
+                // 重新加载进度
+                const { data: pData } = await supabase
+                    .from('progress')
+                    .select('*')
+                    .eq('user_id', currentUser._id);
                 userProgress = {};
                 pData.forEach(p => userProgress[p.question_id] = p);
             }
-        }
 
-        // ========== 全局事件绑定 ==========
-        function bindGlobalEvents() {
-            document.querySelectorAll('.nav-item').forEach(item => {
-                item.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-                    this.classList.add('active');
-                    const module = this.dataset.module;
-                    loadContent(module);
-                });
-            });
+            function getMastery(questionId) {
+                return userProgress[questionId]?.mastery || 0;
+            }
 
-            document.getElementById('userInfo').addEventListener('click', (e) => {
-                if (e.target.classList.contains('logout-icon')) return;
-                if (currentUser) {
-                    showToast(`当前用户：${currentUser.name}`);
-                } else {
-                    openAuthModal();
-                }
-            });
+            function openAuthModal() {
+                document.getElementById('authModal').classList.add('active');
+            }
 
-            document.getElementById('aiAssistant').addEventListener('click', () => showToast('AI助手：请描述问题'));
-            document.getElementById('closeAuthModal').addEventListener('click', closeAuthModal);
+            function closeAuthModal() {
+                document.getElementById('authModal').classList.remove('active');
+            }
 
-            // 退出登录
-            document.getElementById('logoutBtn').addEventListener('click', async function(e) {
-                e.stopPropagation();
-                if (confirm('确定退出登录吗？')) {
-                    currentUser = null;
-                    localStorage.removeItem('xueji_current');
-                    questions = [];
-                    userProgress = {};
+            // ========== 数据加载 ==========
+            async function checkLogin() {
+                const saved = localStorage.getItem('xueji_current');
+                if (saved) {
+                    currentUser = JSON.parse(saved);
                     updateUserUI();
-                    showToast('已退出登录');
-                    loadContent('dashboard');
+                    await loadUserData();
                 }
-            });
-
-            // 登录切换
-            document.getElementById('loginTab').addEventListener('click', function() {
-                document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
-                this.classList.add('active');
-                document.getElementById('loginForm').style.display = 'block';
-                document.getElementById('registerForm').style.display = 'none';
-            });
-
-            document.getElementById('registerTab').addEventListener('click', function() {
-                document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
-                this.classList.add('active');
-                document.getElementById('loginForm').style.display = 'none';
-                document.getElementById('registerForm').style.display = 'block';
-            });
-
-            // 登录
-            document.getElementById('loginBtn').addEventListener('click', async function() {
-                const phone = document.getElementById('loginPhone').value;
-                const pwd = document.getElementById('loginPassword').value;
-                if (!phone || !pwd) {
-                    showToast('请填写手机号和密码');
-                    return;
-                }
-
-                const { data, error } = await supabase
-                    .from('users')
-                    .select('*')
-                    .eq('phone', phone)
-                    .eq('password', pwd);
-
-                if (error || data.length === 0) {
-                    showToast('手机号或密码错误');
-                    return;
-                }
-                const user = data[0];
-                currentUser = {
-                    _id: user.id,
-                    phone: user.phone,
-                    name: user.name,
-                    createdAt: user.created_at
-                };
-                localStorage.setItem('xueji_current', JSON.stringify(currentUser));
-                updateUserUI();
-                closeAuthModal();
-                await loadUserData();
-                showToast('登录成功');
-                loadContent('dashboard');
-            });
-
-            // 注册
-            document.getElementById('registerBtn').addEventListener('click', async function() {
-                const phone = document.getElementById('registerPhone').value;
-                const name = document.getElementById('registerName').value || '用户' + phone.substr(-4);
-                const pwd = document.getElementById('registerPassword').value;
-
-                if (!phone || phone.length !== 11) {
-                    showToast('请输入正确的手机号');
-                    return;
-                }
-                if (!pwd || pwd.length < 6) {
-                    showToast('密码至少6位');
-                    return;
-                }
-
-                // 检查手机号是否已存在
-                const { data: existing, error: checkError } = await supabase
-                    .from('users')
-                    .select('phone')
-                    .eq('phone', phone);
-                if (checkError) { console.error(checkError); showToast('注册失败'); return; }
-                if (existing.length > 0) {
-                    showToast('该手机号已注册');
-                    return;
-                }
-
-                // 插入新用户
-                const { data, error } = await supabase
-                    .from('users')
-                    .insert([{ phone, name, password: pwd, created_at: new Date() }])
-                    .select();
-
-                if (error) {
-                    console.error(error);
-                    showToast('注册失败');
-                    return;
-                }
-
-                const newUser = data[0];
-                currentUser = {
-                    _id: newUser.id,
-                    phone: newUser.phone,
-                    name: newUser.name,
-                    createdAt: newUser.created_at
-                };
-                localStorage.setItem('xueji_current', JSON.stringify(currentUser));
-                updateUserUI();
-                closeAuthModal();
-                showToast('注册成功');
-                loadContent('dashboard');
-            });
-
-            document.getElementById('authModal').addEventListener('click', function(e) {
-                if (e.target === this) closeAuthModal();
-            });
-        }
-
-        // ========== 工具函数 ==========
-        function showToast(msg) {
-            const t = document.querySelector('.toast-message');
-            if (t) t.remove();
-            const toast = document.createElement('div');
-            toast.className = 'toast-message';
-            toast.textContent = msg;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 2000);
-        }
-
-        function showEffect(type) {
-            const layer = document.getElementById('effectLayer');
-            layer.innerHTML = '';
-            if (type === 'balloon') {
-                for (let i = 0; i < 6; i++) {
-                    const b = document.createElement('span');
-                    b.innerText = '🎈';
-                    b.style.position = 'absolute';
-                    b.style.left = Math.random() * 100 + '%';
-                    b.style.bottom = '0';
-                    b.style.fontSize = (30 + Math.random() * 30) + 'px';
-                    b.style.animation = 'floatUp 2s ease-in forwards';
-                    layer.appendChild(b);
-                }
-                setTimeout(() => layer.innerHTML = '', 2000);
-            } else {
-                const m = document.createElement('div');
-                m.innerText = '👾';
-                m.style.fontSize = '60px';
-                m.style.position = 'absolute';
-                m.style.top = '50%';
-                m.style.left = '50%';
-                m.style.transform = 'translate(-50%, -50%)';
-                layer.appendChild(m);
-                setTimeout(() => layer.innerHTML = '', 1500);
             }
-        }
 
-        function updateDate() {
-            const d = new Date();
-            const month = d.getMonth() + 1;
-            const day = d.getDate();
-            document.getElementById('dateBadge').textContent = `${month}月${day}日`;
-        }
+            async function loadUserData() {
+                if (!currentUser) return;
 
-        function updateUserUI() {
-            const logoutBtn = document.getElementById('logoutBtn');
-            if (currentUser) {
-                document.getElementById('userAvatar').textContent = '👤';
-                logoutBtn.style.display = 'inline';
-            } else {
-                document.getElementById('userAvatar').textContent = '📱';
-                logoutBtn.style.display = 'none';
-            }
-        }
-
-        async function updateMastery(questionId, correct) {
-            if (!currentUser) return;
-
-            // 查找是否已有进度记录
-            const { data: existing, error: findError } = await supabase
-                .from('progress')
-                .select('*')
-                .eq('user_id', currentUser._id)
-                .eq('question_id', questionId);
-            if (findError) { console.error(findError); return; }
-
-            if (existing.length > 0) {
-                const record = existing[0];
-                let newMastery = record.mastery;
-                if (correct) newMastery = Math.min(5, record.mastery + 1);
-                else newMastery = 0;
-                const { error: updateError } = await supabase
-                    .from('progress')
-                    .update({
-                        mastery: newMastery,
-                        last_review: new Date(),
-                        history: [...(record.history || []), { time: new Date(), correct }]
-                    })
-                    .eq('id', record.id);
-                if (updateError) console.error(updateError);
-                else record.mastery = newMastery;
-            } else {
-                const newMastery = correct ? 1 : 0;
-                const { data, error } = await supabase
-                    .from('progress')
-                    .insert([{
-                        user_id: currentUser._id,
-                        question_id: questionId,
-                        mastery: newMastery,
-                        last_review: new Date(),
-                        history: [{ time: new Date(), correct }]
-                    }])
-                    .select();
-                if (error) console.error(error);
-            }
-            // 重新加载进度（简单刷新）
-            const { data: pData } = await supabase
-                .from('progress')
-                .select('*')
-                .eq('user_id', currentUser._id);
-            userProgress = {};
-            pData.forEach(p => userProgress[p.question_id] = p);
-        }
-
-        function getMastery(questionId) {
-            return userProgress[questionId]?.mastery || 0;
-        }
-
-        function openAuthModal() {
-            document.getElementById('authModal').classList.add('active');
-        }
-
-        function closeAuthModal() {
-            document.getElementById('authModal').classList.remove('active');
-        }
-
-        // ========== 页面加载函数 ==========
-        function loadContent(module) {
-            const area = document.getElementById('contentArea');
-            switch(module) {
-                case 'dashboard': loadDashboard(area); break;
-                case 'subject': loadSubject(area); break;
-                case 'input': loadQuestionInput(area); break;
-                case 'bank': loadQuestionBank(area); break;
-                case 'batch': loadBatchImport(area); break;
-                case 'image': loadImageSpace(area); break;
-                case 'challenge': loadChallenge(area); break;
-                case 'vip': loadVIP(area); break;
-                case 'bind': loadAccountBind(area); break;
-                default: loadDashboard(area);
-            }
-        }
-
-        // 学习看板
-        function loadDashboard(area) {
-            const total = questions.length;
-            const mastered = Object.values(userProgress).filter(p => p.mastery >= 5).length;
-            area.innerHTML = `
-                <div class="stat-grid">
-                    <div class="stat-card" onclick="showToast('总题库：${total}题')">
-                        <div class="stat-title">总题库</div><div class="stat-number">${total}</div>
-                    </div>
-                    <div class="stat-card" onclick="showToast('已掌握：${mastered}题')">
-                        <div class="stat-title">已掌握</div><div class="stat-number">${mastered}</div>
-                    </div>
-                    <div class="stat-card" onclick="showToast('攻克中：${total-mastered}题')">
-                        <div class="stat-title">攻克中</div><div class="stat-number">${total-mastered}</div>
-                    </div>
-                </div>
-                <div class="section-card">
-                    <div class="card-title">📊 掌握度分布</div>
-                    ${['数学','英语','物理','化学'].map(s => {
-                        const subQ = questions.filter(q => q.subject === s);
-                        const subM = subQ.filter(q => userProgress[q.id]?.mastery >= 5).length;
-                        const pct = subQ.length ? Math.round(subM/subQ.length*100) : 0;
-                        return `
-                            <div class="subject-item" onclick="showToast('${s}掌握度${pct}%')">
-                                <span class="subject-name">${s}</span>
-                                <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-                                <span class="subject-percent">${pct}%</span>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-                <div class="section-card">
-                    <div class="card-title">🔥 学科热力图</div>
-                    <div class="heatmap-grid">
-                        ${['数学','英语','物理','化学'].map((s,i) => `
-                            <div class="heat-item" onclick="showToast('${s}热力图')">
-                                <div class="heat-subject">${s}</div>
-                                <div class="heat-bar"><div class="heat-fill" style="height:${[85,70,55,40][i]}%"></div></div>
-                                <div>${[85,70,55,40][i]}%</div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-        }
-
-        // 学科管理
-        function loadSubject(area) {
-            area.innerHTML = `
-                <div class="section-card">
-                    <div class="card-title">📚 新增学科</div>
-                    <div class="form-group"><input class="form-input" id="newSubject" placeholder="学科名称"></div>
-                    <div class="form-group"><input class="form-input" id="newGrade" placeholder="年级预设（用逗号分隔）"></div>
-                    <div class="form-group"><input class="form-input" id="newChapter" placeholder="章节预设"></div>
-                    <button class="btn" id="addSubjectBtn">添加学科</button>
-                </div>
-                <div class="section-card">
-                    <div class="card-title">已有学科</div>
-                    <div id="subjectList">
-                        ${subjects.map((s, index) => `
-                            <div class="subject-item" style="justify-content:space-between;" data-index="${index}">
-                                <span style="font-weight:500;">${s}</span>
-                                <div>
-                                    <span class="action-icon edit-subject" data-index="${index}" style="margin-right:12px;">✏️ 编辑</span>
-                                    <span class="action-icon delete-subject" data-index="${index}" style="color:#FF6B6B;">🗑️ 删除</span>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-            document.getElementById('addSubjectBtn').addEventListener('click', function() {
-                const name = document.getElementById('newSubject').value.trim();
-                if (!name) { showToast('请输入学科名称'); return; }
-                subjects.push(name);
-                showToast(`添加学科：${name}`);
-                loadSubject(document.getElementById('contentArea'));
-            });
-            document.querySelectorAll('.edit-subject').forEach(btn => {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    const index = this.dataset.index;
-                    showToast(`编辑学科：${subjects[index]}`);
-                });
-            });
-            document.querySelectorAll('.delete-subject').forEach(btn => {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    const index = this.dataset.index;
-                    if (confirm(`确定要删除学科 "${subjects[index]}" 吗？`)) {
-                        subjects.splice(index, 1);
-                        showToast('删除成功');
-                        loadSubject(document.getElementById('contentArea'));
-                    }
-                });
-            });
-        }
-
-        // 题目录入（含图片上传）
-        function loadQuestionInput(area) {
-            currentUploadedFileUrl = null;
-            area.innerHTML = `
-                <div class="section-card">
-                    <div class="card-title">✍️ 录入题目</div>
-                    <div class="form-group">
-                        <select class="form-input" id="qSubject">${subjects.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
-                    </div>
-                    <div class="form-group"><input class="form-input" id="qChapter" placeholder="章节"></div>
-                    <div class="form-group"><input class="form-input" id="qGrade" placeholder="年级"></div>
-                    <div class="form-group"><input class="form-input" id="qSource" placeholder="来源"></div>
-                    <div class="form-group"><textarea class="form-input" id="qContent" rows="4" placeholder="题目内容"></textarea></div>
-                    <div class="form-group"><input class="form-input" id="qAnswer" placeholder="答案"></div>
-                    <div class="form-group">
-                        <label class="form-label">题目图片（可选）</label>
-                        <input type="file" id="questionImage" accept="image/*" style="display:none;">
-                        <div class="upload-zone" id="imageUploadZone"><div class="upload-icon">📷</div><div>点击上传图片</div></div>
-                        <div id="imagePreview" style="margin-top:10px; display:none;"><img id="previewImg" style="max-width:100%; border-radius:10px;"><p style="font-size:12px; color:#2B4BFF;">已上传</p></div>
-                    </div>
-                    <label style="display:flex; align-items:center; gap:8px; margin:16px 0;"><input type="checkbox" id="qIsChoice"> 这是选择题</label>
-                    <button class="btn" id="saveQuestionBtn">保存题目</button>
-                </div>
-            `;
-            document.getElementById('imageUploadZone').addEventListener('click', () => {
-                document.getElementById('questionImage').click();
-            });
-            document.getElementById('questionImage').addEventListener('change', async function(e) {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => {
-                    document.getElementById('previewImg').src = ev.target.result;
-                    document.getElementById('imagePreview').style.display = 'block';
-                };
-                reader.readAsDataURL(file);
-
-                // 上传到 Supabase Storage
-                const filePath = `${currentUser?._id || 'temp'}/${Date.now()}_${file.name}`;
-                const { error } = await supabase.storage
-                    .from('question-images')
-                    .upload(filePath, file);
-                if (error) {
-                    console.error(error);
-                    showToast('图片上传失败');
-                    return;
-                }
-                // 获取公开 URL
-                const { data: urlData } = supabase.storage
-                    .from('question-images')
-                    .getPublicUrl(filePath);
-                currentUploadedFileUrl = urlData.publicUrl;
-                showToast('图片上传成功');
-            });
-            document.getElementById('saveQuestionBtn').addEventListener('click', async function() {
-                if (!currentUser) { showToast('请先登录'); openAuthModal(); return; }
-                const subject = document.getElementById('qSubject').value;
-                const chapter = document.getElementById('qChapter').value.trim();
-                const question = document.getElementById('qContent').value.trim();
-                const answer = document.getElementById('qAnswer').value.trim();
-                if (!chapter || !question || !answer) { showToast('请填写章节、题目和答案'); return; }
-                const newQuestion = {
-                    user_id: currentUser._id,
-                    subject,
-                    chapter,
-                    question,
-                    answer,
-                    options: document.getElementById('qIsChoice').checked ? ['A','B','C','D'] : null,
-                    source: document.getElementById('qSource').value,
-                    grade: document.getElementById('qGrade').value,
-                    image_url: currentUploadedFileUrl,
-                    created_at: new Date()
-                };
-                const { data, error } = await supabase
+                const { data: qData, error: qError } = await supabase
                     .from('questions')
-                    .insert([newQuestion])
-                    .select();
-                if (error) {
-                    console.error(error);
-                    showToast('保存失败');
-                } else {
-                    newQuestion.id = data[0].id;
-                    questions.push(newQuestion);
-                    showToast('题目保存成功');
-                    document.getElementById('qChapter').value = '';
-                    document.getElementById('qContent').value = '';
-                    document.getElementById('qAnswer').value = '';
-                    document.getElementById('qIsChoice').checked = false;
-                    document.getElementById('imagePreview').style.display = 'none';
-                    currentUploadedFileUrl = null;
+                    .select('*')
+                    .eq('user_id', currentUser._id);
+                if (qError) console.error(qError);
+                else questions = qData;
+
+                const { data: pData, error: pError } = await supabase
+                    .from('progress')
+                    .select('*')
+                    .eq('user_id', currentUser._id);
+                if (pError) console.error(pError);
+                else {
+                    userProgress = {};
+                    pData.forEach(p => userProgress[p.question_id] = p);
                 }
-            });
-        }
-
-        // 题库管理
-        async function loadQuestionBank(area) {
-            if (!currentUser) { area.innerHTML = '<div class="section-card">请先登录查看题库</div>'; return; }
-            // 重新加载题目
-            const { data: qData } = await supabase
-                .from('questions')
-                .select('*')
-                .eq('user_id', currentUser._id);
-            questions = qData || [];
-
-            area.innerHTML = `
-                <div class="section-card">
-                    <div class="card-title">📋 题库管理</div>
-                    <input class="form-input" id="searchInput" placeholder="🔍 搜索题目" style="margin-bottom:16px;">
-                    <div class="question-list" id="questionList">
-                        ${questions.map((q, index) => `
-                            <div class="question-item" data-id="${q.id}" data-index="${index}">
-                                <div class="question-header">
-                                    <span>${q.subject} · ${q.chapter}</span>
-                                    <span class="mastery-stars">${'★'.repeat(getMastery(q.id)) + '☆'.repeat(5-getMastery(q.id))}</span>
-                                </div>
-                                <div class="question-preview">${q.question.substring(0,30)}${q.question.length>30?'...':''}</div>
-                                ${q.image_url ? '<span style="color:#2B4BFF;">📷 有图片</span>' : ''}
-                                <div class="action-icons">
-                                    <span class="action-icon edit-question" data-index="${index}">✏️ 编辑</span>
-                                    <span class="action-icon delete-question" data-index="${index}" style="color:#FF6B6B;">🗑️ 删除</span>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-            document.getElementById('searchInput').addEventListener('input', (e) => {
-                const keyword = e.target.value.toLowerCase();
-                document.querySelectorAll('.question-item').forEach(item => {
-                    const text = item.textContent.toLowerCase();
-                    item.style.display = text.includes(keyword) ? 'block' : 'none';
-                });
-            });
-            document.querySelectorAll('.edit-question').forEach(btn => {
-                btn.addEventListener('click', function(e) {
-                    e.stopPropagation();
-                    const index = this.dataset.index;
-                    showToast(`编辑题目：${questions[index].question.substring(0,20)}...`);
-                });
-            });
-            document.querySelectorAll('.delete-question').forEach(btn => {
-                btn.addEventListener('click', async function(e) {
-                    e.stopPropagation();
-                    const index = this.dataset.index;
-                    const q = questions[index];
-                    if (confirm('确定要删除这道题吗？')) {
-                        const { error } = await supabase
-                            .from('questions')
-                            .delete()
-                            .eq('id', q.id);
-                        if (error) {
-                            showToast('删除失败');
-                        } else {
-                            questions.splice(index, 1);
-                            showToast('删除成功');
-                            loadQuestionBank(document.getElementById('contentArea'));
-                        }
-                    }
-                });
-            });
-        }
-
-        // 批量导入（简单）
-        function loadBatchImport(area) {
-            area.innerHTML = `
-                <div class="section-card">
-                    <div class="card-title">📁 批量导入</div>
-                    <div class="form-group">
-                        <select class="form-input" id="batchSubject">${subjects.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
-                    </div>
-                    <div class="upload-zone" id="dropZone"><div class="upload-icon">📂</div><div>点击或拖拽 CSV 文件</div><div style="font-size:12px; color:#7F8C9F;">支持格式：年级,章节,题目,答案,来源</div></div>
-                    <button class="btn" id="startImport">开始导入</button>
-                </div>
-            `;
-            document.getElementById('dropZone').addEventListener('click', () => showToast('选择CSV文件'));
-            document.getElementById('startImport').addEventListener('click', () => {
-                const subject = document.getElementById('batchSubject').value;
-                showToast(`开始导入到 ${subject} 学科`);
-            });
-        }
-
-        // 图片空间
-        async function loadImageSpace(area) {
-            if (!currentUser) { area.innerHTML = '<div class="section-card">请先登录查看图片空间</div>'; return; }
-            const { data, error } = await supabase
-                .from('questions')
-                .select('image_url, chapter, created_at')
-                .eq('user_id', currentUser._id)
-                .not('image_url', 'is', null);
-            if (error) { console.error(error); area.innerHTML = '<div class="section-card">加载失败</div>'; return; }
-
-            area.innerHTML = `
-                <div class="section-card">
-                    <div class="card-title">🖼️ 图片空间</div>
-                    <div class="upload-zone" id="uploadZone"><div class="upload-icon">📤</div><div>上传新图片（前往题目录入）</div></div>
-                    <div class="image-grid" id="imageGrid">
-                        ${data.map(item => `
-                            <div class="image-item" data-url="${item.image_url}">
-                                <div class="image-preview" style="background-image: url('${item.image_url}'); background-size: cover;"></div>
-                                <div class="image-name">${item.chapter}</div>
-                                <div style="font-size:10px; color:#7F8C9F;">${new Date(item.created_at).toLocaleDateString()}</div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-            document.getElementById('uploadZone').addEventListener('click', () => showToast('请在题目录入页面上传图片'));
-            document.querySelectorAll('.image-item').forEach(item => {
-                item.addEventListener('click', function() {
-                    const url = this.dataset.url;
-                    if (url) window.open(url, '_blank');
-                });
-            });
-        }
-
-        // 开始闯关
-        function loadChallenge(area) {
-            area.innerHTML = `
-                <div class="section-card">
-                    <div class="card-title">🎮 开始闯关</div>
-                    <div class="mode-selector">
-                        <div class="mode-card active" id="modeSmart"><div class="mode-icon">🧠</div><div>智能复习</div></div>
-                        <div class="mode-card" id="modeRandom"><div class="mode-icon">🎲</div><div>随机挑战</div></div>
-                    </div>
-                    <div class="filter-row">
-                        <select class="filter-select" id="subjectSelect"><option value="">全部学科</option>${subjects.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
-                        <select class="filter-select" id="gradeSelect"><option>全部年级</option></select>
-                    </div>
-                    <div class="count-selector"><span>题目数量</span><input type="number" class="count-input" id="questionCount" value="5" min="1" max="20"></div>
-                    <button class="btn" id="startChallengeBtn">进入关卡</button>
-                </div>
-            `;
-            document.getElementById('modeSmart').addEventListener('click', function() {
-                document.getElementById('modeRandom').classList.remove('active');
-                this.classList.add('active');
-                showToast('智能复习模式');
-            });
-            document.getElementById('modeRandom').addEventListener('click', function() {
-                document.getElementById('modeSmart').classList.remove('active');
-                this.classList.add('active');
-                showToast('随机挑战模式');
-            });
-            document.getElementById('startChallengeBtn').addEventListener('click', function() {
-                if (!currentUser) { showToast('请先登录'); openAuthModal(); return; }
-                const count = parseInt(document.getElementById('questionCount').value) || 5;
-                let pool = [...questions];
-                if (document.getElementById('modeSmart').classList.contains('active')) {
-                    const needReview = pool.filter(q => getMastery(q.id) < 5);
-                    if (needReview.length >= count) pool = needReview;
-                }
-                pool = pool.sort(() => Math.random() - 0.5).slice(0, count);
-                startPractice(pool);
-            });
-        }
-
-        // 会员续费
-        function loadVIP(area) {
-            area.innerHTML = `
-                <div class="vip-card">
-                    <div class="vip-badge">🌟 VIP会员</div>
-                    <div class="vip-price">￥30 <small>/年</small></div>
-                    <div>有效期至：2028-03-08</div>
-                    <ul class="benefit-list"><li>✓ 无限AI解析</li><li>✓ 多端同步</li><li>✓ 批量导入</li><li>✓ 无限图片空间</li></ul>
-                </div>
-                <div class="section-card">
-                    <div class="card-title">续费会员</div>
-                    <div style="display:flex; gap:12px; margin:16px 0;">
-                        <label style="flex:1; padding:12px; border:2px solid #2B4BFF; border-radius:16px; text-align:center; background:#F0F4FF;"><input type="radio" name="vip" checked style="display:none;"> 年度<br>￥30</label>
-                        <label style="flex:1; padding:12px; border:2px solid #EDF2F7; border-radius:16px; text-align:center;"><input type="radio" name="vip" style="display:none;"> 季度<br>￥10</label>
-                    </div>
-                    <button class="btn" id="payBtn">立即支付</button>
-                </div>
-            `;
-            document.getElementById('payBtn').addEventListener('click', () => showToast('支付功能开发中'));
-        }
-
-        // 账号绑定
-        function loadAccountBind(area) {
-            area.innerHTML = `
-                <div class="section-card">
-                    <div class="card-title">🔗 账号绑定</div>
-                    <div style="background:#F8FAFE; border-radius:16px; padding:16px; margin-bottom:12px;">
-                        <div style="display:flex; align-items:center; gap:12px;">
-                            <span style="font-size:28px;">📱</span>
-                            <div style="flex:1;"><div>手机号绑定</div><div style="color:${currentUser ? '#10B981' : '#7F8C9F'}; font-size:12px;">${currentUser ? '已绑定' : '未绑定'}</div></div>
-                            <span>${currentUser ? currentUser.phone.substr(0,3)+'****'+currentUser.phone.substr(-4) : '未绑定'}</span>
-                        </div>
-                    </div>
-                    <div style="background:#F8FAFE; border-radius:16px; padding:16px; margin-bottom:12px;">
-                        <div style="display:flex; align-items:center; gap:12px;">
-                            <span style="font-size:28px;">💬</span>
-                            <div style="flex:1;"><div>微信账号</div><div style="color:#7F8C9F;">未绑定</div></div>
-                            <button class="action-icon bind-btn" style="padding:8px 16px; background:#2B4BFF; color:white; border:none; border-radius:30px;">绑定</button>
-                        </div>
-                    </div>
-                    <div style="background:#F8FAFE; border-radius:16px; padding:16px;">
-                        <div style="display:flex; align-items:center; gap:12px;">
-                            <span style="font-size:28px;">🐧</span>
-                            <div style="flex:1;"><div>QQ账号</div><div style="color:#7F8C9F;">未绑定</div></div>
-                            <button class="action-icon bind-btn" style="padding:8px 16px; background:#2B4BFF; color:white; border:none; border-radius:30px;">绑定</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.querySelectorAll('.bind-btn').forEach(btn => {
-                btn.addEventListener('click', () => showToast('绑定功能开发中'));
-            });
-        }
-
-        // 答题功能
-        function startPractice(pool) {
-            if (!pool || pool.length === 0) { showToast('没有可用的题目'); return; }
-            currentPractice = { questions: pool, index: 0, answers: [] };
-            showQuestion(0);
-        }
-
-        function showQuestion(idx) {
-            if (!currentPractice) return;
-            const q = currentPractice.questions[idx];
-            const isChoice = q.options && q.options.length;
-            const isLast = idx === currentPractice.questions.length - 1;
-            let html = `
-                <div class="quiz-container">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span>${q.subject} · ${q.chapter}</span><span>${idx+1}/${currentPractice.questions.length}</span></div>
-                    <div style="font-size:18px; margin-bottom:20px;">${q.question}</div>
-            `;
-            if (isChoice) {
-                html += `<div class="options-grid">${q.options.map(opt => `<div class="option-item" data-opt="${opt}">${opt}</div>`).join('')}</div>`;
-            } else {
-                html += `<input class="fill-answer" id="answerInput" placeholder="输入答案">`;
             }
-            html += `
-                    <div class="action-buttons">
-                        <button class="primary-btn" id="submitBtn">提交</button>
-                        ${!isLast ? '<button class="secondary-btn" id="nextBtn">下一题</button>' : ''}
+
+            // ========== 页面加载函数 ==========
+            function loadDashboard(area) {
+                const total = questions.length;
+                const mastered = Object.values(userProgress).filter(p => p.mastery >= 5).length;
+                area.innerHTML = `
+                    <div class="stat-grid">
+                        <div class="stat-card" onclick="showToast('总题库：${total}题')">
+                            <div class="stat-title">总题库</div><div class="stat-number">${total}</div>
+                        </div>
+                        <div class="stat-card" onclick="showToast('已掌握：${mastered}题')">
+                            <div class="stat-title">已掌握</div><div class="stat-number">${mastered}</div>
+                        </div>
+                        <div class="stat-card" onclick="showToast('攻克中：${total-mastered}题')">
+                            <div class="stat-title">攻克中</div><div class="stat-number">${total-mastered}</div>
+                        </div>
                     </div>
-                    <div id="resultArea"></div>
-                </div>
-            `;
-            document.getElementById('contentArea').innerHTML = html;
-            if (isChoice) {
-                document.querySelectorAll('.option-item').forEach(opt => {
-                    opt.addEventListener('click', function() {
-                        document.querySelectorAll('.option-item').forEach(o => o.classList.remove('selected'));
-                        this.classList.add('selected');
+                    <div class="section-card">
+                        <div class="card-title">📊 掌握度分布</div>
+                        ${['数学','英语','物理','化学'].map(s => {
+                            const subQ = questions.filter(q => q.subject === s);
+                            const subM = subQ.filter(q => userProgress[q.id]?.mastery >= 5).length;
+                            const pct = subQ.length ? Math.round(subM/subQ.length*100) : 0;
+                            return `
+                                <div class="subject-item" onclick="showToast('${s}掌握度${pct}%')">
+                                    <span class="subject-name">${s}</span>
+                                    <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+                                    <span class="subject-percent">${pct}%</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                    <div class="section-card">
+                        <div class="card-title">🔥 学科热力图</div>
+                        <div class="heatmap-grid">
+                            ${['数学','英语','物理','化学'].map((s,i) => `
+                                <div class="heat-item" onclick="showToast('${s}热力图')">
+                                    <div class="heat-subject">${s}</div>
+                                    <div class="heat-bar"><div class="heat-fill" style="height:${[85,70,55,40][i]}%"></div></div>
+                                    <div>${[85,70,55,40][i]}%</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            function loadSubject(area) {
+                area.innerHTML = `
+                    <div class="section-card">
+                        <div class="card-title">📚 新增学科</div>
+                        <div class="form-group"><input class="form-input" id="newSubject" placeholder="学科名称"></div>
+                        <div class="form-group"><input class="form-input" id="newGrade" placeholder="年级预设（用逗号分隔）"></div>
+                        <div class="form-group"><input class="form-input" id="newChapter" placeholder="章节预设"></div>
+                        <button class="btn" id="addSubjectBtn">添加学科</button>
+                    </div>
+                    <div class="section-card">
+                        <div class="card-title">已有学科</div>
+                        <div id="subjectList">
+                            ${subjects.map((s, index) => `
+                                <div class="subject-item" style="justify-content:space-between;" data-index="${index}">
+                                    <span style="font-weight:500;">${s}</span>
+                                    <div>
+                                        <span class="action-icon edit-subject" data-index="${index}" style="margin-right:12px;">✏️ 编辑</span>
+                                        <span class="action-icon delete-subject" data-index="${index}" style="color:#FF6B6B;">🗑️ 删除</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+                document.getElementById('addSubjectBtn').addEventListener('click', function() {
+                    const name = document.getElementById('newSubject').value.trim();
+                    if (!name) { showToast('请输入学科名称'); return; }
+                    subjects.push(name);
+                    showToast(`添加学科：${name}`);
+                    loadSubject(document.getElementById('contentArea'));
+                });
+                document.querySelectorAll('.edit-subject').forEach(btn => {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const index = this.dataset.index;
+                        showToast(`编辑学科：${subjects[index]}`);
+                    });
+                });
+                document.querySelectorAll('.delete-subject').forEach(btn => {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const index = this.dataset.index;
+                        if (confirm(`确定要删除学科 "${subjects[index]}" 吗？`)) {
+                            subjects.splice(index, 1);
+                            showToast('删除成功');
+                            loadSubject(document.getElementById('contentArea'));
+                        }
                     });
                 });
             }
-            document.getElementById('submitBtn').addEventListener('click', async () => {
-                let userAns = '', correct = false;
-                if (isChoice) {
-                    const selected = document.querySelector('.option-item.selected');
-                    if (!selected) { showToast('请选择一个选项'); return; }
-                    userAns = selected.dataset.opt;
-                    correct = userAns === q.answer;
-                } else {
-                    userAns = document.getElementById('answerInput')?.value || '';
-                    correct = userAns.trim().toLowerCase() === q.answer.trim().toLowerCase();
-                }
-                await updateMastery(q.id, correct);
-                currentPractice.answers.push({ correct });
-                showEffect(correct ? 'balloon' : 'monster');
-                document.getElementById('resultArea').innerHTML = `
-                    <div class="result-card">
-                        <span class="result-icon">${correct ? '🎉' : '💪'}</span>
-                        <div><div style="font-weight:600;">${correct ? '答对了！' : '再接再厉'}</div><div style="font-size:13px; color:#7F8C9F;">${correct ? '掌握度+1' : '正确答案：'+q.answer}</div></div>
+
+            function loadQuestionInput(area) {
+                currentUploadedFileUrl = null;
+                area.innerHTML = `
+                    <div class="section-card">
+                        <div class="card-title">✍️ 录入题目</div>
+                        <div class="form-group">
+                            <select class="form-input" id="qSubject">${subjects.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
+                        </div>
+                        <div class="form-group"><input class="form-input" id="qChapter" placeholder="章节"></div>
+                        <div class="form-group"><input class="form-input" id="qGrade" placeholder="年级"></div>
+                        <div class="form-group"><input class="form-input" id="qSource" placeholder="来源"></div>
+                        <div class="form-group"><textarea class="form-input" id="qContent" rows="4" placeholder="题目内容"></textarea></div>
+                        <div class="form-group"><input class="form-input" id="qAnswer" placeholder="答案"></div>
+                        <div class="form-group">
+                            <label class="form-label">题目图片（可选）</label>
+                            <input type="file" id="questionImage" accept="image/*" style="display:none;">
+                            <div class="upload-zone" id="imageUploadZone"><div class="upload-icon">📷</div><div>点击上传图片</div></div>
+                            <div id="imagePreview" style="margin-top:10px; display:none;"><img id="previewImg" style="max-width:100%; border-radius:10px;"><p style="font-size:12px; color:#2B4BFF;">已上传</p></div>
+                        </div>
+                        <label style="display:flex; align-items:center; gap:8px; margin:16px 0;"><input type="checkbox" id="qIsChoice"> 这是选择题</label>
+                        <button class="btn" id="saveQuestionBtn">保存题目</button>
                     </div>
                 `;
-                if (idx === currentPractice.questions.length - 1) {
-                    setTimeout(() => {
-                        const correctCount = currentPractice.answers.filter(a => a.correct).length;
-                        showToast(`完成！正确率 ${correctCount}/${currentPractice.questions.length}`);
-                        loadContent('challenge');
-                        currentPractice = null;
-                    }, 2000);
-                }
-            });
-            if (document.getElementById('nextBtn')) {
-                document.getElementById('nextBtn').addEventListener('click', () => {
-                    if (idx < currentPractice.questions.length - 1) showQuestion(idx + 1);
+                document.getElementById('imageUploadZone').addEventListener('click', () => {
+                    document.getElementById('questionImage').click();
+                });
+                document.getElementById('questionImage').addEventListener('change', async function(e) {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        document.getElementById('previewImg').src = ev.target.result;
+                        document.getElementById('imagePreview').style.display = 'block';
+                    };
+                    reader.readAsDataURL(file);
+
+                    const filePath = `${currentUser?._id || 'temp'}/${Date.now()}_${file.name}`;
+                    const { error } = await supabase.storage
+                        .from('question-images')
+                        .upload(filePath, file);
+                    if (error) {
+                        console.error(error);
+                        showToast('图片上传失败');
+                        return;
+                    }
+                    const { data: urlData } = supabase.storage
+                        .from('question-images')
+                        .getPublicUrl(filePath);
+                    currentUploadedFileUrl = urlData.publicUrl;
+                    showToast('图片上传成功');
+                });
+                document.getElementById('saveQuestionBtn').addEventListener('click', async function() {
+                    if (!currentUser) { showToast('请先登录'); openAuthModal(); return; }
+                    const subject = document.getElementById('qSubject').value;
+                    const chapter = document.getElementById('qChapter').value.trim();
+                    const question = document.getElementById('qContent').value.trim();
+                    const answer = document.getElementById('qAnswer').value.trim();
+                    if (!chapter || !question || !answer) { showToast('请填写章节、题目和答案'); return; }
+                    const newQuestion = {
+                        user_id: currentUser._id,
+                        subject,
+                        chapter,
+                        question,
+                        answer,
+                        options: document.getElementById('qIsChoice').checked ? ['A','B','C','D'] : null,
+                        source: document.getElementById('qSource').value,
+                        grade: document.getElementById('qGrade').value,
+                        image_url: currentUploadedFileUrl,
+                        created_at: new Date()
+                    };
+                    const { data, error } = await supabase
+                        .from('questions')
+                        .insert([newQuestion])
+                        .select();
+                    if (error) {
+                        console.error(error);
+                        showToast('保存失败');
+                    } else {
+                        newQuestion.id = data[0].id;
+                        questions.push(newQuestion);
+                        showToast('题目保存成功');
+                        document.getElementById('qChapter').value = '';
+                        document.getElementById('qContent').value = '';
+                        document.getElementById('qAnswer').value = '';
+                        document.getElementById('qIsChoice').checked = false;
+                        document.getElementById('imagePreview').style.display = 'none';
+                        currentUploadedFileUrl = null;
+                    }
                 });
             }
-        }
 
-        // 启动
-        init();
+            async function loadQuestionBank(area) {
+                if (!currentUser) { area.innerHTML = '<div class="section-card">请先登录查看题库</div>'; return; }
+                const { data: qData } = await supabase
+                    .from('questions')
+                    .select('*')
+                    .eq('user_id', currentUser._id);
+                questions = qData || [];
+
+                area.innerHTML = `
+                    <div class="section-card">
+                        <div class="card-title">📋 题库管理</div>
+                        <input class="form-input" id="searchInput" placeholder="🔍 搜索题目" style="margin-bottom:16px;">
+                        <div class="question-list" id="questionList">
+                            ${questions.map((q, index) => `
+                                <div class="question-item" data-id="${q.id}" data-index="${index}">
+                                    <div class="question-header">
+                                        <span>${q.subject} · ${q.chapter}</span>
+                                        <span class="mastery-stars">${'★'.repeat(getMastery(q.id)) + '☆'.repeat(5-getMastery(q.id))}</span>
+                                    </div>
+                                    <div class="question-preview">${q.question.substring(0,30)}${q.question.length>30?'...':''}</div>
+                                    ${q.image_url ? '<span style="color:#2B4BFF;">📷 有图片</span>' : ''}
+                                    <div class="action-icons">
+                                        <span class="action-icon edit-question" data-index="${index}">✏️ 编辑</span>
+                                        <span class="action-icon delete-question" data-index="${index}" style="color:#FF6B6B;">🗑️ 删除</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+                document.getElementById('searchInput').addEventListener('input', (e) => {
+                    const keyword = e.target.value.toLowerCase();
+                    document.querySelectorAll('.question-item').forEach(item => {
+                        const text = item.textContent.toLowerCase();
+                        item.style.display = text.includes(keyword) ? 'block' : 'none';
+                    });
+                });
+                document.querySelectorAll('.edit-question').forEach(btn => {
+                    btn.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        const index = this.dataset.index;
+                        showToast(`编辑题目：${questions[index].question.substring(0,20)}...`);
+                    });
+                });
+                document.querySelectorAll('.delete-question').forEach(btn => {
+                    btn.addEventListener('click', async function(e) {
+                        e.stopPropagation();
+                        const index = this.dataset.index;
+                        const q = questions[index];
+                        if (confirm('确定要删除这道题吗？')) {
+                            const { error } = await supabase
+                                .from('questions')
+                                .delete()
+                                .eq('id', q.id);
+                            if (error) {
+                                showToast('删除失败');
+                            } else {
+                                questions.splice(index, 1);
+                                showToast('删除成功');
+                                loadQuestionBank(document.getElementById('contentArea'));
+                            }
+                        }
+                    });
+                });
+            }
+
+            function loadBatchImport(area) {
+                area.innerHTML = `
+                    <div class="section-card">
+                        <div class="card-title">📁 批量导入</div>
+                        <div class="form-group">
+                            <select class="form-input" id="batchSubject">${subjects.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
+                        </div>
+                        <div class="upload-zone" id="dropZone"><div class="upload-icon">📂</div><div>点击或拖拽 CSV 文件</div><div style="font-size:12px; color:#7F8C9F;">支持格式：年级,章节,题目,答案,来源</div></div>
+                        <button class="btn" id="startImport">开始导入</button>
+                    </div>
+                `;
+                document.getElementById('dropZone').addEventListener('click', () => showToast('选择CSV文件'));
+                document.getElementById('startImport').addEventListener('click', () => {
+                    const subject = document.getElementById('batchSubject').value;
+                    showToast(`开始导入到 ${subject} 学科`);
+                });
+            }
+
+            async function loadImageSpace(area) {
+                if (!currentUser) { area.innerHTML = '<div class="section-card">请先登录查看图片空间</div>'; return; }
+                const { data, error } = await supabase
+                    .from('questions')
+                    .select('image_url, chapter, created_at')
+                    .eq('user_id', currentUser._id)
+                    .not('image_url', 'is', null);
+                if (error) { console.error(error); area.innerHTML = '<div class="section-card">加载失败</div>'; return; }
+
+                area.innerHTML = `
+                    <div class="section-card">
+                        <div class="card-title">🖼️ 图片空间</div>
+                        <div class="upload-zone" id="uploadZone"><div class="upload-icon">📤</div><div>上传新图片（前往题目录入）</div></div>
+                        <div class="image-grid" id="imageGrid">
+                            ${data.map(item => `
+                                <div class="image-item" data-url="${item.image_url}">
+                                    <div class="image-preview" style="background-image: url('${item.image_url}'); background-size: cover;"></div>
+                                    <div class="image-name">${item.chapter}</div>
+                                    <div style="font-size:10px; color:#7F8C9F;">${new Date(item.created_at).toLocaleDateString()}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+                document.getElementById('uploadZone').addEventListener('click', () => showToast('请在题目录入页面上传图片'));
+                document.querySelectorAll('.image-item').forEach(item => {
+                    item.addEventListener('click', function() {
+                        const url = this.dataset.url;
+                        if (url) window.open(url, '_blank');
+                    });
+                });
+            }
+
+            function loadChallenge(area) {
+                area.innerHTML = `
+                    <div class="section-card">
+                        <div class="card-title">🎮 开始闯关</div>
+                        <div class="mode-selector">
+                            <div class="mode-card active" id="modeSmart"><div class="mode-icon">🧠</div><div>智能复习</div></div>
+                            <div class="mode-card" id="modeRandom"><div class="mode-icon">🎲</div><div>随机挑战</div></div>
+                        </div>
+                        <div class="filter-row">
+                            <select class="filter-select" id="subjectSelect"><option value="">全部学科</option>${subjects.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
+                            <select class="filter-select" id="gradeSelect"><option>全部年级</option></select>
+                        </div>
+                        <div class="count-selector"><span>题目数量</span><input type="number" class="count-input" id="questionCount" value="5" min="1" max="20"></div>
+                        <button class="btn" id="startChallengeBtn">进入关卡</button>
+                    </div>
+                `;
+                document.getElementById('modeSmart').addEventListener('click', function() {
+                    document.getElementById('modeRandom').classList.remove('active');
+                    this.classList.add('active');
+                    showToast('智能复习模式');
+                });
+                document.getElementById('modeRandom').addEventListener('click', function() {
+                    document.getElementById('modeSmart').classList.remove('active');
+                    this.classList.add('active');
+                    showToast('随机挑战模式');
+                });
+                document.getElementById('startChallengeBtn').addEventListener('click', function() {
+                    if (!currentUser) { showToast('请先登录'); openAuthModal(); return; }
+                    const count = parseInt(document.getElementById('questionCount').value) || 5;
+                    let pool = [...questions];
+                    if (document.getElementById('modeSmart').classList.contains('active')) {
+                        const needReview = pool.filter(q => getMastery(q.id) < 5);
+                        if (needReview.length >= count) pool = needReview;
+                    }
+                    pool = pool.sort(() => Math.random() - 0.5).slice(0, count);
+                    startPractice(pool);
+                });
+            }
+
+            function loadVIP(area) {
+                area.innerHTML = `
+                    <div class="vip-card">
+                        <div class="vip-badge">🌟 VIP会员</div>
+                        <div class="vip-price">￥30 <small>/年</small></div>
+                        <div>有效期至：2028-03-08</div>
+                        <ul class="benefit-list"><li>✓ 无限AI解析</li><li>✓ 多端同步</li><li>✓ 批量导入</li><li>✓ 无限图片空间</li></ul>
+                    </div>
+                    <div class="section-card">
+                        <div class="card-title">续费会员</div>
+                        <div style="display:flex; gap:12px; margin:16px 0;">
+                            <label style="flex:1; padding:12px; border:2px solid #2B4BFF; border-radius:16px; text-align:center; background:#F0F4FF;"><input type="radio" name="vip" checked style="display:none;"> 年度<br>￥30</label>
+                            <label style="flex:1; padding:12px; border:2px solid #EDF2F7; border-radius:16px; text-align:center;"><input type="radio" name="vip" style="display:none;"> 季度<br>￥10</label>
+                        </div>
+                        <button class="btn" id="payBtn">立即支付</button>
+                    </div>
+                `;
+                document.getElementById('payBtn').addEventListener('click', () => showToast('支付功能开发中'));
+            }
+
+            function loadAccountBind(area) {
+                area.innerHTML = `
+                    <div class="section-card">
+                        <div class="card-title">🔗 账号绑定</div>
+                        <div style="background:#F8FAFE; border-radius:16px; padding:16px; margin-bottom:12px;">
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                <span style="font-size:28px;">📱</span>
+                                <div style="flex:1;"><div>手机号绑定</div><div style="color:${currentUser ? '#10B981' : '#7F8C9F'}; font-size:12px;">${currentUser ? '已绑定' : '未绑定'}</div></div>
+                                <span>${currentUser ? currentUser.phone.substr(0,3)+'****'+currentUser.phone.substr(-4) : '未绑定'}</span>
+                            </div>
+                        </div>
+                        <div style="background:#F8FAFE; border-radius:16px; padding:16px; margin-bottom:12px;">
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                <span style="font-size:28px;">💬</span>
+                                <div style="flex:1;"><div>微信账号</div><div style="color:#7F8C9F;">未绑定</div></div>
+                                <button class="action-icon bind-btn" style="padding:8px 16px; background:#2B4BFF; color:white; border:none; border-radius:30px;">绑定</button>
+                            </div>
+                        </div>
+                        <div style="background:#F8FAFE; border-radius:16px; padding:16px;">
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                <span style="font-size:28px;">🐧</span>
+                                <div style="flex:1;"><div>QQ账号</div><div style="color:#7F8C9F;">未绑定</div></div>
+                                <button class="action-icon bind-btn" style="padding:8px 16px; background:#2B4BFF; color:white; border:none; border-radius:30px;">绑定</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.querySelectorAll('.bind-btn').forEach(btn => {
+                    btn.addEventListener('click', () => showToast('绑定功能开发中'));
+                });
+            }
+
+            function startPractice(pool) {
+                if (!pool || pool.length === 0) { showToast('没有可用的题目'); return; }
+                currentPractice = { questions: pool, index: 0, answers: [] };
+                showQuestion(0);
+            }
+
+            function showQuestion(idx) {
+                if (!currentPractice) return;
+                const q = currentPractice.questions[idx];
+                const isChoice = q.options && q.options.length;
+                const isLast = idx === currentPractice.questions.length - 1;
+                let html = `
+                    <div class="quiz-container">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:16px;"><span>${q.subject} · ${q.chapter}</span><span>${idx+1}/${currentPractice.questions.length}</span></div>
+                        <div style="font-size:18px; margin-bottom:20px;">${q.question}</div>
+                `;
+                if (isChoice) {
+                    html += `<div class="options-grid">${q.options.map(opt => `<div class="option-item" data-opt="${opt}">${opt}</div>`).join('')}</div>`;
+                } else {
+                    html += `<input class="fill-answer" id="answerInput" placeholder="输入答案">`;
+                }
+                html += `
+                        <div class="action-buttons">
+                            <button class="primary-btn" id="submitBtn">提交</button>
+                            ${!isLast ? '<button class="secondary-btn" id="nextBtn">下一题</button>' : ''}
+                        </div>
+                        <div id="resultArea"></div>
+                    </div>
+                `;
+                document.getElementById('contentArea').innerHTML = html;
+                if (isChoice) {
+                    document.querySelectorAll('.option-item').forEach(opt => {
+                        opt.addEventListener('click', function() {
+                            document.querySelectorAll('.option-item').forEach(o => o.classList.remove('selected'));
+                            this.classList.add('selected');
+                        });
+                    });
+                }
+                document.getElementById('submitBtn').addEventListener('click', async () => {
+                    let userAns = '', correct = false;
+                    if (isChoice) {
+                        const selected = document.querySelector('.option-item.selected');
+                        if (!selected) { showToast('请选择一个选项'); return; }
+                        userAns = selected.dataset.opt;
+                        correct = userAns === q.answer;
+                    } else {
+                        userAns = document.getElementById('answerInput')?.value || '';
+                        correct = userAns.trim().toLowerCase() === q.answer.trim().toLowerCase();
+                    }
+                    await updateMastery(q.id, correct);
+                    currentPractice.answers.push({ correct });
+                    showEffect(correct ? 'balloon' : 'monster');
+                    document.getElementById('resultArea').innerHTML = `
+                        <div class="result-card">
+                            <span class="result-icon">${correct ? '🎉' : '💪'}</span>
+                            <div><div style="font-weight:600;">${correct ? '答对了！' : '再接再厉'}</div><div style="font-size:13px; color:#7F8C9F;">${correct ? '掌握度+1' : '正确答案：'+q.answer}</div></div>
+                        </div>
+                    `;
+                    if (idx === currentPractice.questions.length - 1) {
+                        setTimeout(() => {
+                            const correctCount = currentPractice.answers.filter(a => a.correct).length;
+                            showToast(`完成！正确率 ${correctCount}/${currentPractice.questions.length}`);
+                            loadContent('challenge');
+                            currentPractice = null;
+                        }, 2000);
+                    }
+                });
+                if (document.getElementById('nextBtn')) {
+                    document.getElementById('nextBtn').addEventListener('click', () => {
+                        if (idx < currentPractice.questions.length - 1) showQuestion(idx + 1);
+                    });
+                }
+            }
+
+            function loadContent(module) {
+                const area = document.getElementById('contentArea');
+                switch(module) {
+                    case 'dashboard': loadDashboard(area); break;
+                    case 'subject': loadSubject(area); break;
+                    case 'input': loadQuestionInput(area); break;
+                    case 'bank': loadQuestionBank(area); break;
+                    case 'batch': loadBatchImport(area); break;
+                    case 'image': loadImageSpace(area); break;
+                    case 'challenge': loadChallenge(area); break;
+                    case 'vip': loadVIP(area); break;
+                    case 'bind': loadAccountBind(area); break;
+                    default: loadDashboard(area);
+                }
+            }
+
+            // ========== 全局事件绑定 ==========
+            function bindGlobalEvents() {
+                document.querySelectorAll('.nav-item').forEach(item => {
+                    item.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                        this.classList.add('active');
+                        const module = this.dataset.module;
+                        loadContent(module);
+                    });
+                });
+
+                document.getElementById('userInfo').addEventListener('click', (e) => {
+                    if (e.target.classList.contains('logout-icon')) return;
+                    if (currentUser) {
+                        showToast(`当前用户：${currentUser.name}`);
+                    } else {
+                        openAuthModal();
+                    }
+                });
+
+                document.getElementById('aiAssistant').addEventListener('click', () => showToast('AI助手：请描述问题'));
+                document.getElementById('closeAuthModal').addEventListener('click', closeAuthModal);
+
+                document.getElementById('logoutBtn').addEventListener('click', async function(e) {
+                    e.stopPropagation();
+                    if (confirm('确定退出登录吗？')) {
+                        currentUser = null;
+                        localStorage.removeItem('xueji_current');
+                        questions = [];
+                        userProgress = {};
+                        updateUserUI();
+                        showToast('已退出登录');
+                        loadContent('dashboard');
+                    }
+                });
+
+                document.getElementById('loginTab').addEventListener('click', function() {
+                    document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    document.getElementById('loginForm').style.display = 'block';
+                    document.getElementById('registerForm').style.display = 'none';
+                });
+
+                document.getElementById('registerTab').addEventListener('click', function() {
+                    document.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    document.getElementById('loginForm').style.display = 'none';
+                    document.getElementById('registerForm').style.display = 'block';
+                });
+
+                document.getElementById('loginBtn').addEventListener('click', async function() {
+                    const phone = document.getElementById('loginPhone').value;
+                    const pwd = document.getElementById('loginPassword').value;
+                    if (!phone || !pwd) {
+                        showToast('请填写手机号和密码');
+                        return;
+                    }
+
+                    const { data, error } = await supabase
+                        .from('users')
+                        .select('*')
+                        .eq('phone', phone)
+                        .eq('password', pwd);
+
+                    if (error || data.length === 0) {
+                        showToast('手机号或密码错误');
+                        return;
+                    }
+                    const user = data[0];
+                    currentUser = {
+                        _id: user.id,
+                        phone: user.phone,
+                        name: user.name,
+                        createdAt: user.created_at
+                    };
+                    localStorage.setItem('xueji_current', JSON.stringify(currentUser));
+                    updateUserUI();
+                    closeAuthModal();
+                    await loadUserData();
+                    showToast('登录成功');
+                    loadContent('dashboard');
+                });
+
+                document.getElementById('registerBtn').addEventListener('click', async function() {
+                    const phone = document.getElementById('registerPhone').value;
+                    const name = document.getElementById('registerName').value || '用户' + phone.substr(-4);
+                    const pwd = document.getElementById('registerPassword').value;
+
+                    if (!phone || phone.length !== 11) {
+                        showToast('请输入正确的手机号');
+                        return;
+                    }
+                    if (!pwd || pwd.length < 6) {
+                        showToast('密码至少6位');
+                        return;
+                    }
+
+                    const { data: existing, error: checkError } = await supabase
+                        .from('users')
+                        .select('phone')
+                        .eq('phone', phone);
+                    if (checkError) { console.error(checkError); showToast('注册失败'); return; }
+                    if (existing.length > 0) {
+                        showToast('该手机号已注册');
+                        return;
+                    }
+
+                    const { data, error } = await supabase
+                        .from('users')
+                        .insert([{ phone, name, password: pwd, created_at: new Date() }])
+                        .select();
+
+                    if (error) {
+                        console.error(error);
+                        showToast('注册失败');
+                        return;
+                    }
+
+                    const newUser = data[0];
+                    currentUser = {
+                        _id: newUser.id,
+                        phone: newUser.phone,
+                        name: newUser.name,
+                        createdAt: newUser.created_at
+                    };
+                    localStorage.setItem('xueji_current', JSON.stringify(currentUser));
+                    updateUserUI();
+                    closeAuthModal();
+                    showToast('注册成功');
+                    loadContent('dashboard');
+                });
+
+                document.getElementById('authModal').addEventListener('click', function(e) {
+                    if (e.target === this) closeAuthModal();
+                });
+            }
+
+            // ========== 启动应用 ==========
+            async function init() {
+                console.log('应用启动');
+                await checkLogin();
+                updateDate();
+                loadContent('dashboard');
+                bindGlobalEvents();
+            }
+
+            init();
+        })();
     </script>
 </body>
 </html>
